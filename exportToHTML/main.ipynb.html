@@ -1,0 +1,750 @@
+<html>
+<head>
+<title>main.ipynb</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #8c8c8c; font-style: italic;}
+.s1 { color: #080808;}
+.s2 { color: #0033b3;}
+.s3 { color: #067d17;}
+.s4 { color: #1750eb;}
+.s5 { color: #0037a6;}
+</style>
+</head>
+<body bgcolor="#ffffff">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#c0c0c0" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+main.ipynb</font>
+</center></td></tr></table>
+<pre><span class="s0">#%% md 
+</span><span class="s1"># **Analysis of Twitch Social Network** 
+ 
+## **Introduction** 
+ 
+This project focuses on analyzing the social network of Twitch using the dataset provided by SNAP (Stanford Network Analysis Project). Twitch is a live-streaming platform, primarily for gaming, hosting a vast community of streamers and viewers. The Twitch social network is represented as an undirected graph, where nodes are users, and edges represent mutual friendships. This project aims to study the interaction dynamics, community structures, and user behaviors within the network. 
+ 
+--- 
+ 
+## **Project Objectives** 
+ 
+### 1. **User Behavior Analysis** 
+I will examine the interactions between users on the platform by analyzing metrics such as: 
+- Node degree (number of connections). 
+- Centrality (relative importance of a node in the network). 
+- Distribution of connections and identification of influential users. 
+ 
+### 2. **Community Detection** 
+I will apply community detection algorithms to identify groups of users that are strongly connected. This will help to understand how communities form based on shared characteristics, such as language, preferred games, or geographical location. 
+ 
+### 3. **Explicit Content Analysis** 
+I will predict the likelihood of a streamer using explicit language based on their connections and attributes. This will be achieved using supervised machine learning techniques, leveraging node attributes and graph connections. 
+ 
+--- 
+ 
+## **Tools Used** 
+- **Python**: The primary programming language. 
+- **NetworkX**: For graph manipulation and analysis. 
+- **Scikit-learn**: For implementing machine learning models. 
+- **Matplotlib/Seaborn**: For data and result visualization. 
+- **Gephi**: For interactive network visualization. 
+ 
+ 
+--- 
+ 
+ 
+</span><span class="s0">#%% md 
+</span><span class="s1">## **1. Data Loading and Preprocessing** 
+ 
+</span><span class="s0">#%% 
+</span><span class="s2">import </span><span class="s1">networkx </span><span class="s2">as </span><span class="s1">nx</span>
+<span class="s2">import </span><span class="s1">numpy </span><span class="s2">as </span><span class="s1">np</span>
+<span class="s2">import </span><span class="s1">pandas </span><span class="s2">as </span><span class="s1">pd</span>
+<span class="s2">import </span><span class="s1">matplotlib.pyplot </span><span class="s2">as </span><span class="s1">plt</span>
+<span class="s2">import </span><span class="s1">matplotlib.image </span><span class="s2">as </span><span class="s1">mpimg</span>
+<span class="s2">from </span><span class="s1">collections </span><span class="s2">import </span><span class="s1">defaultdict</span>
+<span class="s2">import </span><span class="s1">seaborn </span><span class="s2">as </span><span class="s1">sns</span>
+<span class="s2">from </span><span class="s1">node2vec </span><span class="s2">import </span><span class="s1">Node2Vec</span>
+<span class="s2">from </span><span class="s1">sklearn.cluster </span><span class="s2">import </span><span class="s1">KMeans</span>
+<span class="s2">from </span><span class="s1">sklearn.metrics </span><span class="s2">import </span><span class="s1">silhouette_score, normalized_mutual_info_score</span>
+<span class="s0">#%% md 
+</span><span class="s1">### 1. Load the dataset, including: 
+   - Edge list: representing user connections on Twitch. 
+   - Node features: describing user attributes (e.g., language, streaming behavior). 
+</span><span class="s0">#%% 
+# Load the edge list</span>
+<span class="s1">edgelist = pd.read_csv(</span><span class="s3">'large_twitch_edges.csv'</span><span class="s1">, )</span>
+<span class="s0"># Display the first few rows to understand the structure</span>
+<span class="s1">edgelist.head()</span>
+<span class="s0">#%% 
+# Load CSV file with node features</span>
+<span class="s1">node_features = pd.read_csv(</span><span class="s3">&quot;large_twitch_features.csv&quot;</span><span class="s1">, index_col=</span><span class="s4">5</span><span class="s1">)</span>
+<span class="s0"># Display the first few rows to understand the structure</span>
+<span class="s1">node_features.head()</span>
+<span class="s0">#%% 
+</span><span class="s1">node_features.describe()</span>
+<span class="s0">#%% md 
+</span><span class="s1">At first sight, I note that: 
+- **Edge List**: Represents the connections between Twitch users, where each row is a link between two users (`numeric_id_1` and `numeric_id_2`). 
+- **Node Features**: Contains attributes for each user (node) such as: 
+  - `views`: Total number of views a streamer has. 
+  - `mature`: Indicates if the streamer produces mature content (1 for yes, 0 for no). 
+  - `life_time`: Lifetime of the user's account (in days). 
+  - `created_at` and `updated_at`: Account creation and last update dates. 
+  - `dead_account`: Indicates if the account is inactive. 
+  - `language`: The main language used by the user. 
+  - `affiliate`: Indicates if the user is a Twitch affiliate (1 for yes, 0 for no). 
+</span><span class="s0">#%% md 
+</span><span class="s1">### 2. Clean and preprocess the data: 
+   - Handle missing values and duplicates. 
+</span><span class="s0">#%% 
+# Check for null values and duplicates in the edge list</span>
+<span class="s1">print(</span><span class="s3">&quot;### Edge List ###&quot;</span><span class="s1">)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Total rows in edge list: </span><span class="s5">{</span><span class="s1">edgelist.shape[</span><span class="s4">0</span><span class="s1">]</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Check for null values</span>
+<span class="s1">null_values_edges = edgelist.isnull().sum()</span>
+<span class="s1">print(</span><span class="s3">&quot;Null values in edge list:&quot;</span><span class="s1">)</span>
+<span class="s1">print(null_values_edges)</span>
+
+<span class="s0"># Check for duplicates</span>
+<span class="s1">duplicates_edges = edgelist.duplicated().sum()</span>
+<span class="s1">print(</span><span class="s3">f&quot;Duplicate rows in edge list: </span><span class="s5">{</span><span class="s1">duplicates_edges</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s1">print(</span><span class="s3">&quot;</span><span class="s5">\n</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Check for null values and duplicates in the node attributes</span>
+<span class="s1">print(</span><span class="s3">&quot;### Node Attributes ###&quot;</span><span class="s1">)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Total rows in node attributes: </span><span class="s5">{</span><span class="s1">node_features.shape[</span><span class="s4">0</span><span class="s1">]</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Check for null values</span>
+<span class="s1">null_values_nodes = node_features.isnull().sum()</span>
+<span class="s1">print(</span><span class="s3">&quot;Null values in node attributes:&quot;</span><span class="s1">)</span>
+<span class="s1">print(null_values_nodes)</span>
+<span class="s0">#%% md 
+</span><span class="s1">- **Edge List**: 
+  - No null values found in `numeric_id_1` or `numeric_id_2`. 
+  - No duplicate rows detected. 
+ 
+- **Node Attributes**: 
+  - No null values in any columns (`views`, `mature`, `life_time`, etc.). 
+ 
+Both datasets are clean and ready for the next step: building the graph using the edge list and enriching it with node attributes. 
+</span><span class="s0">#%% md 
+</span><span class="s1">### 3. Build the graph: 
+   - Use NetworkX to create the graph from the edge list. 
+   - Add node features to the graph. 
+</span><span class="s0">#%% 
+</span><span class="s1">OG = nx.from_pandas_edgelist(edgelist, source=</span><span class="s3">'numeric_id_1'</span><span class="s1">, target=</span><span class="s3">'numeric_id_2'</span><span class="s1">, create_using=nx.Graph())</span>
+<span class="s1">print(OG)</span>
+<span class="s1">print(</span><span class="s3">'Is the graph directed ?'</span><span class="s1">,OG.is_directed())</span>
+<span class="s0">#%% md 
+</span><span class="s1">I built an **undirected graph** where: 
+* Nodes are Twitch streamers. 
+* Edges are mutual friendships between Twitch streamers. 
+ 
+</span><span class="s0">#%% 
+# Add node features to the graph</span>
+<span class="s1">nx.set_node_attributes(OG, node_features.to_dict(orient=</span><span class="s3">'index'</span><span class="s1">))</span>
+
+<span class="s0"># Check correctness of this operation</span>
+<span class="s1">example_node = list(OG.nodes)[</span><span class="s4">0</span><span class="s1">]</span>
+<span class="s1">print(</span><span class="s3">f&quot;Attributes for node </span><span class="s5">{</span><span class="s1">example_node</span><span class="s5">}</span><span class="s3">: </span><span class="s5">{</span><span class="s1">OG.nodes[example_node]</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">Another important step is to check for **self loops** and removing them: 
+</span><span class="s0">#%% 
+</span><span class="s1">OG.remove_edges_from(nx.selfloop_edges(OG))</span>
+<span class="s1">print(OG)</span>
+<span class="s0">#%% md 
+</span><span class="s1">As we can see from the output, no edges have been removed. 
+ 
+ 
+For the purposes of this project and to facilitate analysis, I will take into account only a part of the network of Twitch streamers. 
+At first, I filter the nodes with `language` attribute and count them : 
+ 
+</span><span class="s0">#%% 
+</span><span class="s1">language_counts = defaultdict(int)</span>
+
+<span class="s0"># Iteration through nodes</span>
+<span class="s2">for </span><span class="s1">node, attr </span><span class="s2">in </span><span class="s1">OG.nodes(data=</span><span class="s2">True</span><span class="s1">):</span>
+    <span class="s1">language = attr.get(</span><span class="s3">'language'</span><span class="s1">, </span><span class="s3">'Unknown'</span><span class="s1">)</span>
+    <span class="s1">language_counts[language] += </span><span class="s4">1</span>
+
+<span class="s0"># Print </span>
+<span class="s2">for </span><span class="s1">language, count </span><span class="s2">in </span><span class="s1">language_counts.items():</span>
+    <span class="s1">print(</span><span class="s3">f&quot;Language: </span><span class="s5">{</span><span class="s1">language</span><span class="s5">}</span><span class="s3">, Count: </span><span class="s5">{</span><span class="s1">count</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">**French** network has a medium size, so I will use it as starting point, creating an independent subgraph (`G`) from the original one (`OG`) 
+</span><span class="s0">#%% 
+# Filter nodes with attribute 'language' = 'FR'</span>
+<span class="s1">nodes_with_fr = [n </span><span class="s2">for </span><span class="s1">n, attr </span><span class="s2">in </span><span class="s1">OG.nodes(data=</span><span class="s2">True</span><span class="s1">) </span><span class="s2">if </span><span class="s1">attr.get(</span><span class="s3">'language'</span><span class="s1">) == </span><span class="s3">'FR'</span><span class="s1">]</span>
+
+<span class="s0"># Create independent subgraph</span>
+<span class="s1">G = OG.subgraph(nodes_with_fr).copy()</span>
+
+<span class="s1">print(G)</span>
+<span class="s1">print(</span><span class="s3">f'Is the graph directed?'</span><span class="s1">, G.is_directed())</span>
+<span class="s0">#%% 
+</span><span class="s1">example_node = list(G.nodes)[</span><span class="s4">0</span><span class="s1">]</span>
+<span class="s1">print(</span><span class="s3">f&quot;Attributes for node </span><span class="s5">{</span><span class="s1">example_node</span><span class="s5">}</span><span class="s3">: </span><span class="s5">{</span><span class="s1">G.nodes[example_node]</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">### 4. Save the cleaned data for later use. 
+ 
+In this section, I will save the Graph in a format compatible with Gephi, for visualisation. 
+</span><span class="s0">#%% 
+</span><span class="s1">nx.write_graphml(G, </span><span class="s3">&quot;twitch_networkFR.graphml&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">### 5. Network Visualisation 
+ 
+ 
+The visualisation below is elaborated with Gephi.  
+ 
+I used ForceAtlas2 and coloured nodes with green (non-affiliated streamers) and red (affiliated streamers).  
+ 
+ 
+![vis1](vis1.png) 
+</span><span class="s0">#%% md 
+</span><span class="s1">This ForceAtlas2 visualization of the network reveals some key features of the graph: 
+ 
+1. **Clustering**: 
+     
+   There is a **central cluster** that contains nodes that are highly connected, likely representing influential or well-integrated streamers within the network. The **peripheral nodes** are less connected and likely represent either new streamers or those with minimal interaction in the network. We can see that the majority of peripheral nodes are not affiliated streamers, meaning that nodes that are less connected / important aren't in collaboration with the platform. 
+ 
+2. **Community Detection**: 
+ 
+   An important point to explore is if there are distinct communities within the network, and how affiliation and other attributes correlate with these groups. At first sight, we can see a big central cluster, but this could be divided in more communities, maybe based on type of content or seniority. 
+ 
+3. **Role of Peripheral Nodes**: 
+ 
+   What characterizes the streamers in the periphery? Are they newcomers, or do they belong to smaller, isolated clusters? 
+ 
+</span><span class="s0">#%% md 
+</span><span class="s1">--- 
+ 
+## **2. USER BEHAVIOR ANALYSIS** 
+ 
+</span><span class="s0">#%% md 
+</span><span class="s1">This section focuses on a deeper understanding of network features, in particular on how users are connected and interact. 
+ 
+At first, I will compute density: 
+</span><span class="s0">#%% 
+</span><span class="s1">density = nx.density(G)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Density of graph: </span><span class="s5">{</span><span class="s1">density</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">The Twitch French network has a density of **0.00535**, indicating that only the 0.5% of all possible connections are available.  
+ 
+The network is **sparse**. This is typical for large social networks, where users selectively connect to a small subset of others with similar interests rather than forming a densely connected graph. 
+ 
+????Future analysis will explore how density varies across communities and the role of highly connected nodes (hubs) in linking otherwise sparse parts of the network. 
+ 
+--- 
+### 1. Degree analysis 
+ 
+Proceeding with analysis of degree, I compute it for each node in the graph... 
+</span><span class="s0">#%% 
+</span><span class="s1">G_degree=G.degree()</span>
+<span class="s1">G_degreelist=list(dict(G.degree()).values())</span>
+<span class="s1">len(G_degreelist)</span>
+<span class="s0">#%% md 
+</span><span class="s1">... and I put it in a list from which I can compute some statistics: 
+</span><span class="s0">#%% 
+</span><span class="s1">print(</span><span class="s3">f'Average degree is'</span><span class="s1">, np.mean(G_degreelist))</span>
+<span class="s1">print(</span><span class="s3">f'Minimum degree is'</span><span class="s1">, np.min(G_degreelist))</span>
+<span class="s1">print(</span><span class="s3">f'Maximum degree is'</span><span class="s1">, np.max(G_degreelist))</span>
+<span class="s1">print(</span><span class="s3">f'Median degree is'</span><span class="s1">, np.median(G_degreelist))</span>
+<span class="s0">#%% md 
+</span><span class="s1">The degree analysis reveals key insights about the Twitch French network: 
+- The **average degree** is **36.37**, indicating that each user is, on average, connected to 36 other users. 
+- The **median degree** is **19**, highlighting that most users have fewer connections than the average, due to the possible influence of highly connected hubs. 
+- The **maximum degree** is **2081**, representing a key hub in the network, while some nodes are completely isolated (**minimum degree** = 0). 
+ 
+This suggests a highly **asymmetric degree distribution**, likely following a power-law, with a few influential nodes connecting the majority of less connected users. Let's check ECDF to prove it. 
+</span><span class="s0">#%% 
+# ECDF function</span>
+<span class="s2">def </span><span class="s1">ECDF(x):</span>
+    <span class="s1">y = np.arange(</span><span class="s4">1</span><span class="s1">, len(x) + </span><span class="s4">1</span><span class="s1">) / len(x)</span>
+    <span class="s2">return </span><span class="s1">y</span>
+
+<span class="s0"># Set axis</span>
+<span class="s1">x = np.unique(G_degreelist)</span>
+<span class="s1">y = ECDF(x)</span>
+
+<span class="s0"># Plot</span>
+<span class="s1">fig_cdf_function = plt.figure(figsize=(</span><span class="s4">8</span><span class="s1">,</span><span class="s4">4.5</span><span class="s1">))</span>
+<span class="s1">axes = fig_cdf_function.gca()</span>
+<span class="s1">axes.loglog(x,y, linestyle = </span><span class="s3">'--'</span><span class="s1">, marker= </span><span class="s3">'o'</span><span class="s1">, ms=</span><span class="s4">3</span><span class="s1">)</span>
+<span class="s1">axes.set_xlabel(</span><span class="s3">'Degree'</span><span class="s1">)</span>
+<span class="s1">axes.set_ylabel(</span><span class="s3">'ECDF'</span><span class="s1">)</span>
+<span class="s1">plt.grid(which=</span><span class="s3">&quot;both&quot;</span><span class="s1">, linestyle=</span><span class="s3">&quot;--&quot;</span><span class="s1">, linewidth=</span><span class="s4">0.5</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">ECDF of the network shows a **long tail**, typical of **scale-free networks**, where few hubs have a high degree, while the majority has a low degree. This structure is typical of social network, where few users have a lot of connections.  
+ 
+To better understand the structure, let's compare ECCDF with two important models: **random networks** (Erdős-Rényi) and **small-world models** (Watts-Strogatz). 
+</span><span class="s0">#%% 
+# ECCDF Function</span>
+<span class="s2">def </span><span class="s1">ECCDF(degree_sequence):</span>
+    <span class="s1">sorted_degrees = np.sort(degree_sequence)</span>
+    <span class="s1">ECCDF = </span><span class="s4">1 </span><span class="s1">- ECDF(sorted_degrees)</span>
+    <span class="s2">return </span><span class="s1">sorted_degrees, ECCDF  </span><span class="s0"># ECCDF = 1 - CDF</span>
+
+<span class="s0"># Degree sequence for the real graph</span>
+<span class="s1">real_degrees = [d </span><span class="s2">for </span><span class="s1">_, d </span><span class="s2">in </span><span class="s1">G.degree()]</span>
+
+<span class="s0"># Generate random graph (Erdős-Rényi)</span>
+<span class="s1">random_graph = nx.gnm_random_graph(n=G.number_of_nodes(), m=G.number_of_edges())</span>
+<span class="s1">random_degrees = [d </span><span class="s2">for </span><span class="s1">_, d </span><span class="s2">in </span><span class="s1">random_graph.degree()]</span>
+
+<span class="s0"># Generate Barabási-Albert graph</span>
+<span class="s1">ba_graph = nx.barabasi_albert_graph(n=G.number_of_nodes(), m=int(np.mean(real_degrees) // </span><span class="s4">2</span><span class="s1">))</span>
+<span class="s1">ba_degrees = [d </span><span class="s2">for </span><span class="s1">_, d </span><span class="s2">in </span><span class="s1">ba_graph.degree()]</span>
+
+<span class="s0"># Compute ECCDFs</span>
+<span class="s1">real_x, real_eccdf = ECCDF(real_degrees)</span>
+<span class="s1">random_x, random_eccdf = ECCDF(random_degrees)</span>
+<span class="s1">ba_x, ba_eccdf = ECCDF(ba_degrees)</span>
+
+<span class="s0"># Plot ECCDFs</span>
+<span class="s1">plt.figure(figsize=(</span><span class="s4">10</span><span class="s1">, </span><span class="s4">6</span><span class="s1">))</span>
+<span class="s1">plt.loglog(real_x, real_eccdf, label=</span><span class="s3">&quot;Twitch Network (Real)&quot;</span><span class="s1">, marker=</span><span class="s3">&quot;o&quot;</span><span class="s1">, linestyle=</span><span class="s3">&quot;none&quot;</span><span class="s1">, color=</span><span class="s3">&quot;red&quot;</span><span class="s1">)</span>
+<span class="s1">plt.loglog(random_x, random_eccdf, label=</span><span class="s3">&quot;Random Network (Erdős-Rényi)&quot;</span><span class="s1">, marker=</span><span class="s3">&quot;s&quot;</span><span class="s1">, linestyle=</span><span class="s3">&quot;none&quot;</span><span class="s1">, color=</span><span class="s3">&quot;blue&quot;</span><span class="s1">)</span>
+<span class="s1">plt.loglog(ba_x, ba_eccdf, label=</span><span class="s3">&quot;Barabási-Albert Network&quot;</span><span class="s1">, marker=</span><span class="s3">&quot;x&quot;</span><span class="s1">, linestyle=</span><span class="s3">&quot;none&quot;</span><span class="s1">, color=</span><span class="s3">&quot;purple&quot;</span><span class="s1">)</span>
+
+<span class="s1">plt.xlabel(</span><span class="s3">&quot;Degree (log scale)&quot;</span><span class="s1">)</span>
+<span class="s1">plt.ylabel(</span><span class="s3">&quot;ECCDF (log scale)&quot;</span><span class="s1">)</span>
+<span class="s1">plt.title(</span><span class="s3">&quot;ECCDF Comparison: Twitch vs Random vs Watts-Strogatz vs Barabási-Albert&quot;</span><span class="s1">)</span>
+<span class="s1">plt.legend()</span>
+<span class="s1">plt.grid(which=</span><span class="s3">&quot;both&quot;</span><span class="s1">, linestyle=</span><span class="s3">&quot;--&quot;</span><span class="s1">, linewidth=</span><span class="s4">0.5</span><span class="s1">)</span>
+<span class="s1">plt.show()</span>
+<span class="s0">#%% md 
+</span><span class="s1">- The **Erdős-Rényi model** fails to replicate the heterogeneity of the Twitch network, as it generates networks with a uniform degree distribution. There are no hubs. 
+- The **Barabási-Albert model** provides the closest approximation to the real network, highlighting the preferential attachment mechanism behind the emergence of hubs. 
+ 
+This comparison confirms that the Twitch network follows a scale-free structure, with the Barabási-Albert model being the most suitable representation of its degree distribution. 
+ 
+ 
+--- 
+### **2. Connectivity** 
+ 
+ 
+In this section, I analyze the role of hubs in maintaining the connectivity of the network. Hubs are defined as nodes with a degree in the top 5% of the network (95th percentile). 
+</span><span class="s0">#%% 
+</span><span class="s1">hub_threshold = np.percentile(G_degreelist, </span><span class="s4">95</span><span class="s1">)</span>
+<span class="s1">hubs = {k </span><span class="s2">for </span><span class="s1">k, v </span><span class="s2">in </span><span class="s1">G.degree() </span><span class="s2">if </span><span class="s1">v &gt;= hub_threshold}</span>
+<span class="s1">print(</span><span class="s3">f&quot;Hub threshold: </span><span class="s5">{</span><span class="s1">hub_threshold</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Number of hubs: </span><span class="s5">{</span><span class="s1">len(hubs)</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">Nodes with a degree **higher than 108** are classified as hubs. 
+ 
+I found a total of **340 hubs**, which are the top 5% of the most connected nodes.  
+ 
+Now, let's compute _connected components_: 
+</span><span class="s0">#%% 
+</span><span class="s1">connected_components = [len(c) </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">sorted(nx.connected_components(G), key=len, reverse=</span><span class="s2">True</span><span class="s1">)]</span>
+<span class="s1">print(</span><span class="s3">f&quot;Number of connected components: </span><span class="s5">{</span><span class="s1">len(connected_components)</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Size of largest connected component: </span><span class="s5">{</span><span class="s1">connected_components[</span><span class="s4">0</span><span class="s1">]</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">) </span>
+<span class="s1">print(</span><span class="s3">f'Size of each component: </span><span class="s5">{</span><span class="s1">connected_components</span><span class="s5">}</span><span class="s3">'</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">The network contains **78** connected components. Checking the dimensione of each of them, I stated that there is one **giant component** with 6720 nodes and all the other components are of size 1 or 2. 
+ 
+Let's move on with analysis of hubs: 
+</span><span class="s0">#%% 
+# Subgraph of hubs</span>
+<span class="s1">hub_subgraph = G.subgraph(hubs).copy()</span>
+<span class="s1">nx.write_gexf(hub_subgraph, </span><span class="s3">&quot;hubs.gexf&quot;</span><span class="s1">)</span>
+<span class="s0">#  Number of connected components bw hubs</span>
+<span class="s1">hubs_ccs = len(list(nx.connected_components(hub_subgraph)))</span>
+<span class="s1">print(</span><span class="s3">f&quot;Number of connected components among hubs: </span><span class="s5">{</span><span class="s1">hubs_ccs</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Size of largest hub component</span>
+<span class="s1">hub_components_sizes = [len(c) </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">sorted(nx.connected_components(hub_subgraph), key=len, reverse=</span><span class="s2">True</span><span class="s1">)]</span>
+<span class="s1">print(</span><span class="s3">f&quot;Size of largest hub component: </span><span class="s5">{</span><span class="s1">hub_components_sizes[</span><span class="s4">0</span><span class="s1">]</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">Anylizing the subgraph of hubs (_figure below_) reveals that they form a **single connected component**. This means that top streamers in Twitch are strongly interconnected and form a dense network. 
+ 
+![hubs](hubs.png) 
+ 
+Let's check what happens if I remove hubs from the network: 
+</span><span class="s0">#%% 
+# Remove hubs</span>
+<span class="s1">G_no_hubs = G.copy()</span>
+<span class="s1">G_no_hubs.remove_nodes_from(hubs)</span>
+
+<span class="s0"># Number of connected components after hub removal</span>
+<span class="s1">no_hubs_components = [len(c) </span><span class="s2">for </span><span class="s1">c </span><span class="s2">in </span><span class="s1">sorted(nx.connected_components(G_no_hubs), key=len, reverse=</span><span class="s2">True</span><span class="s1">)]</span>
+<span class="s1">print(</span><span class="s3">f&quot;Number of connected components without hubs: </span><span class="s5">{</span><span class="s1">len(no_hubs_components)</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Size of largest component without hubs: </span><span class="s5">{</span><span class="s1">no_hubs_components[</span><span class="s4">0</span><span class="s1">]</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">) </span>
+<span class="s1">print(</span><span class="s3">f'Size of each component: </span><span class="s5">{</span><span class="s1">no_hubs_components</span><span class="s5">}</span><span class="s3">'</span><span class="s1">)</span>
+<span class="s0">#%% 
+</span><span class="s1">print(</span><span class="s3">f'Density of hubs subgrafh is'</span><span class="s1">, nx.density(hub_subgraph)*</span><span class="s4">100</span><span class="s1">)</span>
+<span class="s1">print(</span><span class="s3">f'Density of network without hubs is'</span><span class="s1">, nx.density(G_no_hubs)*</span><span class="s4">100</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">Removing the 340 hubs increases the number of connected components from 78 to 374, which might appear as a significant increase. However, this **growth is largely meaningless**, as the newly disconnected components consist predominantly of isolated nodes or very small clusters of size 1 or 2. 
+ 
+The size of the largest connected component decreases only slightly, from 6,720 to 6,075 nodes, retaining the vast majority of the network. 
+ 
+A big difference in density is stated: 
+- Hubs are connected with a density of 15%. 
+- Graph without hubs decreases in density from 0.5% to 0.2%.  
+ 
+This demonstrates that while hubs play a key role in connecting smaller peripheral components, the network’s core structure remains **robust** and **largely unaffected** by their removal. 
+ 
+--- 
+### **3. Triangles and Clustering** 
+ 
+In this section, we aim to analyze the local and global clustering properties of the Twitch network. 
+We address two specific research questions. 
+ 
+ 
+</span><span class="s0">#%% 
+# Compute global clustering coefficient</span>
+<span class="s1">global_clustering = nx.average_clustering(G)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Global Clustering Coefficient: </span><span class="s5">{</span><span class="s1">global_clustering</span><span class="s5">:</span><span class="s3">.4f</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Compute local clustering coefficient for each node</span>
+<span class="s1">local_clustering = nx.clustering(G)</span>
+<span class="s1">degree_clustering = {node: (G.degree[node], local_clustering[node]) </span><span class="s2">for </span><span class="s1">node </span><span class="s2">in </span><span class="s1">G.nodes}</span>
+<span class="s1">degrees, clustering_coeffs = zip(*degree_clustering.values())</span>
+<span class="s0"># Assign clustering coefficient as a node attribute</span>
+<span class="s1">nx.set_node_attributes(G, local_clustering, name=</span><span class="s3">&quot;clustering_coefficient&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Compute number of triangles for each node</span>
+<span class="s1">triangles = nx.triangles(G)</span>
+
+<span class="s0"># Compute triangles for hubs</span>
+<span class="s1">hub_triangles = {hub: triangles[hub] </span><span class="s2">for </span><span class="s1">hub </span><span class="s2">in </span><span class="s1">hubs}</span>
+
+<span class="s0"># Compute average number of triangles for hubs and non-hubs</span>
+<span class="s1">non_hubs = set(G.nodes) - set(hubs)</span>
+<span class="s1">non_hub_triangles = {node: triangles[node] </span><span class="s2">for </span><span class="s1">node </span><span class="s2">in </span><span class="s1">non_hubs}</span>
+
+<span class="s1">avg_hub_triangles = np.mean(list(hub_triangles.values()))</span>
+<span class="s1">avg_non_hub_triangles = np.mean(list(non_hub_triangles.values()))</span>
+
+<span class="s1">print(</span><span class="s3">f&quot;Average number of triangles (Hubs): </span><span class="s5">{</span><span class="s1">avg_hub_triangles</span><span class="s5">:</span><span class="s3">.2f</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Average number of triangles (Non-Hubs): </span><span class="s5">{</span><span class="s1">avg_non_hub_triangles</span><span class="s5">:</span><span class="s3">.2f</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Compute degree and triangles of hubs</span>
+<span class="s1">hub_degrees = [G.degree[hub] </span><span class="s2">for </span><span class="s1">hub </span><span class="s2">in </span><span class="s1">hub_triangles.keys()]</span>
+<span class="s1">hub_triangle_counts = list(hub_triangles.values())</span>
+
+<span class="s0"># Plotting</span>
+<span class="s1">fig, axes = plt.subplots(</span><span class="s4">1</span><span class="s1">, </span><span class="s4">2</span><span class="s1">, figsize=(</span><span class="s4">16</span><span class="s1">, </span><span class="s4">5</span><span class="s1">), constrained_layout=</span><span class="s2">True</span><span class="s1">)</span>
+
+<span class="s0"># 1. Degree vs Clustering Coefficient</span>
+<span class="s1">axes[</span><span class="s4">0</span><span class="s1">].scatter(degrees, clustering_coeffs, alpha=</span><span class="s4">0.3</span><span class="s1">, color=</span><span class="s3">&quot;blue&quot;</span><span class="s1">, edgecolor=</span><span class="s3">&quot;black&quot;</span><span class="s1">, s=</span><span class="s4">20</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">0</span><span class="s1">].set_xlabel(</span><span class="s3">&quot;Degree&quot;</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">0</span><span class="s1">].set_ylabel(</span><span class="s3">&quot;Local Clustering Coefficient&quot;</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">0</span><span class="s1">].set_title(</span><span class="s3">&quot;Degree vs Local Clustering Coefficient&quot;</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">0</span><span class="s1">].grid(linestyle=</span><span class="s3">&quot;--&quot;</span><span class="s1">, alpha=</span><span class="s4">0.7</span><span class="s1">)</span>
+
+<span class="s0"># 2. Degree vs Triangles (Hubs)</span>
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].scatter(hub_degrees, hub_triangle_counts, color=</span><span class="s3">&quot;red&quot;</span><span class="s1">, alpha=</span><span class="s4">0.7</span><span class="s1">, label=</span><span class="s3">&quot;Hubs&quot;</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].set_xlabel(</span><span class="s3">&quot;Degree&quot;</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].set_ylabel(</span><span class="s3">&quot;Number of Triangles&quot;</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].set_title(</span><span class="s3">&quot;Degree vs Triangles (Hubs)&quot;</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].grid(linestyle=</span><span class="s3">&quot;--&quot;</span><span class="s1">, alpha=</span><span class="s4">0.7</span><span class="s1">)</span>
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].legend()</span>
+
+<span class="s1">plt.show()</span>
+<span class="s0">#%% md 
+</span><span class="s1">#### - What is the global clustering coefficient? Does it indicate that the network is highly clustered? 
+The **global clustering coefficient** of the Twitch network is **0.2205**, which is relatively low. This result indicates that 22% of potential triangles is actually closed. This results confirms the hypothesis that hubs act as bridges for isolated communities or nodes but don't necessarily rely on a central structure position. However, local neighborhoods may still show dense structures, likely driven by specific groups or communities within the network. 
+ 
+#### - Do the most influential streamers (hubs) participate in a significant number of triangles? 
+ 
+The high difference on average number of triangles between hub and non-hub nodes suggests that they play a crucial role in creation of dense local structures (triangles) in the network.  
+ 
+The scatter plot illustrates that _low-degree nodes_ have a wide range of clustering coefficients, with some reaching the maximum value of 1. This indicates that low-degree nodes are often part of **small, tightly connected groups**. These likely represent **localized communities** who interact frequently. 
+ 
+Nodes with a _high degree tend_ to have **lower clustering coefficients**, reflecting the difficulty of forming triangles as the number of neighbors increases. This is typical in **scale-free networks**, where hubs connect many nodes but their neighbors are less likely to be interconnected. Hubs connect communities but are not strongly embedded in any specific group, serving as **bridges between different communities**. 
+ 
+</span><span class="s0">#%% md 
+</span><span class="s1">### **4. Centrality** 
+ 
+This section will try to identify **most central streamers** according to different centrality measures. 
+</span><span class="s0">#%% 
+</span><span class="s1">degree_centrality = nx.degree_centrality(G)</span>
+<span class="s1">closeness_centrality = nx.closeness_centrality(G)</span>
+<span class="s1">betweenness_centrality = nx.betweenness_centrality(G)</span>
+<span class="s1">pagerank = nx.pagerank(G)</span>
+<span class="s0">#%% md 
+</span><span class="s1">After computing centrality according to different measures, I extract the top 10 nodes for each measure: 
+</span><span class="s0">#%% 
+# Funzione per estrarre i top 10 nodi da un dizionario di centralità</span>
+<span class="s2">def </span><span class="s1">get_top_n_nodes(centrality_dict, n=</span><span class="s4">10</span><span class="s1">):</span>
+    <span class="s0"># Ordina i nodi in base ai valori di centralità in ordine decrescente</span>
+    <span class="s1">sorted_nodes = sorted(centrality_dict.items(), key=</span><span class="s2">lambda </span><span class="s1">x: x[</span><span class="s4">1</span><span class="s1">], reverse=</span><span class="s2">True</span><span class="s1">)</span>
+    <span class="s0"># Restituisce i primi n nodi</span>
+    <span class="s2">return </span><span class="s1">sorted_nodes[:n]</span>
+
+<span class="s0"># Estrazione dei top 10 nodi per ciascuna centralità</span>
+<span class="s1">top_degree = get_top_n_nodes(degree_centrality)</span>
+<span class="s1">top_closeness = get_top_n_nodes(closeness_centrality)</span>
+<span class="s1">top_betweenness = get_top_n_nodes(betweenness_centrality)</span>
+<span class="s1">top_pagerank = get_top_n_nodes(pagerank)</span>
+
+<span class="s0"># Visualizza i risultati</span>
+<span class="s1">print(</span><span class="s3">&quot;Top 10 Nodes by Degree Centrality:&quot;</span><span class="s1">)</span>
+<span class="s2">for </span><span class="s1">node, value </span><span class="s2">in </span><span class="s1">top_degree:</span>
+    <span class="s1">print(</span><span class="s3">f&quot;Node: </span><span class="s5">{</span><span class="s1">node</span><span class="s5">}</span><span class="s3">, Value: </span><span class="s5">{</span><span class="s1">value</span><span class="s5">:</span><span class="s3">.5f</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s1">print(</span><span class="s3">&quot;</span><span class="s5">\n</span><span class="s3">Top 10 Nodes by Closeness Centrality:&quot;</span><span class="s1">)</span>
+<span class="s2">for </span><span class="s1">node, value </span><span class="s2">in </span><span class="s1">top_closeness:</span>
+    <span class="s1">print(</span><span class="s3">f&quot;Node: </span><span class="s5">{</span><span class="s1">node</span><span class="s5">}</span><span class="s3">, Value: </span><span class="s5">{</span><span class="s1">value</span><span class="s5">:</span><span class="s3">.5f</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s1">print(</span><span class="s3">&quot;</span><span class="s5">\n</span><span class="s3">Top 10 Nodes by Betweenness Centrality:&quot;</span><span class="s1">)</span>
+<span class="s2">for </span><span class="s1">node, value </span><span class="s2">in </span><span class="s1">top_betweenness:</span>
+    <span class="s1">print(</span><span class="s3">f&quot;Node: </span><span class="s5">{</span><span class="s1">node</span><span class="s5">}</span><span class="s3">, Value: </span><span class="s5">{</span><span class="s1">value</span><span class="s5">:</span><span class="s3">.5f</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s1">print(</span><span class="s3">&quot;</span><span class="s5">\n</span><span class="s3">Top 10 Nodes by PageRank:&quot;</span><span class="s1">)</span>
+<span class="s2">for </span><span class="s1">node, value </span><span class="s2">in </span><span class="s1">top_pagerank:</span>
+    <span class="s1">print(</span><span class="s3">f&quot;Node: </span><span class="s5">{</span><span class="s1">node</span><span class="s5">}</span><span class="s3">, Value: </span><span class="s5">{</span><span class="s1">value</span><span class="s5">:</span><span class="s3">.5f</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">Node **43374** ranks highest across all centrality mesaures, proving its role as the most influential and well-connected node in the network. It may represent the **most famous French Twitch streamer**.  
+Notice that also Pagerank value is high meaning that this streamer has also important connections.  
+ 
+Anyway, the top 10 ranking is almost the same in every measure, meaning that these nodes are important for different purposes. 
+ 
+Now, I compute a **correlation matrix** to get some insights about the structure of the network: 
+</span><span class="s0">#%% 
+</span><span class="s1">df_centrality = pd.DataFrame({</span>
+    <span class="s3">'Degree'</span><span class="s1">: pd.Series(degree_centrality),</span>
+    <span class="s3">'CLoseness'</span><span class="s1">: pd.Series(closeness_centrality),</span>
+    <span class="s3">'Betweenness'</span><span class="s1">: pd.Series(betweenness_centrality),</span>
+    <span class="s3">'PageRank'</span><span class="s1">: pd.Series(pagerank)</span>
+<span class="s1">})</span>
+
+<span class="s0"># Compute correlation matrix</span>
+<span class="s1">corr = df_centrality.corr(method=</span><span class="s3">'kendall'</span><span class="s1">)</span>
+
+<span class="s0"># Visualization</span>
+<span class="s1">fig = plt.figure(figsize=(</span><span class="s4">8</span><span class="s1">,</span><span class="s4">8</span><span class="s1">))</span>
+<span class="s1">ax = fig.add_subplot()</span>
+<span class="s1">sns.heatmap(corr, annot=</span><span class="s2">True</span><span class="s1">, cmap=</span><span class="s3">'coolwarm'</span><span class="s1">, ax = ax)</span>
+<span class="s0">#%% md 
+</span><span class="s1">Key observations: 
+1. **High correlation between degree and [PageRank, betweenness]** (0.95, 0.75). In the case of PageRank, this means that most followed streamers have also strong association with other influential users. 
+ High betweenness correlation suggests that &quot;influencers&quot; are important in connecting different communities. 
+2. **Moderate correlation between degree and closeness** (0.57). 
+This relation is weak. It means that highly-connected nodes aren't necessary close to all nodes in terms of path lenght. Streamers may be very popular in dense communities, but not so close to others even though they're connected to them. 
+3. **Weak correlation of closeness with betweenness and PageRank** (0.54 both).  
+This low correlation is mainly referred to the definition of closeness, which relies on path length rather than number of connections. This could mean that streamers who are structurally central may not be so influent in the network. 
+ 
+</span><span class="s0">#%% md 
+</span><span class="s1">Let's add degree as a node attribute so I can understand common features that important streamers have in common: 
+ 
+</span><span class="s0">#%% 
+# Calculate the degree for each node in the graph</span>
+<span class="s1">node_degrees = dict(G.degree())</span>
+
+<span class="s0"># Add the degree as a node attribute</span>
+<span class="s1">nx.set_node_attributes(G, node_degrees, name=</span><span class="s3">&quot;degree&quot;</span><span class="s1">)</span>
+<span class="s0">#%% 
+</span><span class="s1">top_nodes = [</span><span class="s4">43374</span><span class="s1">, </span><span class="s4">73257</span><span class="s1">, </span><span class="s4">29715</span><span class="s1">, </span><span class="s4">121165</span><span class="s1">, </span><span class="s4">86212</span><span class="s1">, </span><span class="s4">119716</span><span class="s1">, </span><span class="s4">103342</span><span class="s1">, </span><span class="s4">21793</span><span class="s1">, </span><span class="s4">94380</span><span class="s1">, </span><span class="s4">92107</span><span class="s1">]</span>
+
+<span class="s1">node_data = []</span>
+
+<span class="s0"># Retrieve attributes for each node and store in a list</span>
+<span class="s2">for </span><span class="s1">node </span><span class="s2">in </span><span class="s1">top_nodes:</span>
+    <span class="s2">if </span><span class="s1">node </span><span class="s2">in </span><span class="s1">G.nodes:</span>
+        <span class="s1">attributes = G.nodes[node]  </span><span class="s0"># Get node attributes</span>
+        <span class="s1">attributes[</span><span class="s3">'node_id'</span><span class="s1">] = node  </span><span class="s0"># Add node ID as an attribute</span>
+        <span class="s1">node_data.append(attributes)  </span><span class="s0"># Append to the list</span>
+
+<span class="s1">node_df = pd.DataFrame(node_data)</span>
+
+<span class="s1">node_df</span>
+<span class="s0">#%% md 
+</span><span class="s1">The table reports attributes of top 10 most important nodes in centrality. Note that:  
+* **degree** and **number of views** are hugely above the mean values.  
+* **created_at** field shows that most of these nodes have been active for a long time (as early as 2009-2012). This suggests that these top nodes are long-standing accounts, possibly indicating veteran streamers or influential figures in the network. 
+* Interestingly, none of these nodes appear to have the **affiliate status** set to 1. This could mean that they operate independently or belong to a different structure in the Twitch ecosystem. 
+--- 
+</span><span class="s0">#%% md 
+</span><span class="s1">## **2. Community detection** 
+ 
+Now, I apply community detection procedure to identify groups of nodes with similar characteristics, and I will proceed with the analysis of these groups. 
+ 
+#### **1. Louvain Algorithm** 
+ 
+Let's start with the application of Louvain algorithm, which aims to find communities basing on internal density of them. 
+</span><span class="s0">#%% 
+# Compute communities using Louvain algorithm</span>
+<span class="s1">communities = nx.community.louvain_communities(G, seed=</span><span class="s4">42</span><span class="s1">)</span>
+
+<span class="s0"># Print number of communities</span>
+<span class="s1">num_communities = len(communities)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Number of communities detected: </span><span class="s5">{</span><span class="s1">num_communities</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Associate communities to nodes attributes</span>
+<span class="s1">node_to_community = {}</span>
+<span class="s2">for </span><span class="s1">community_id, community_nodes </span><span class="s2">in </span><span class="s1">enumerate(communities):</span>
+    <span class="s2">for </span><span class="s1">node </span><span class="s2">in </span><span class="s1">community_nodes:</span>
+        <span class="s1">node_to_community[node] = community_id</span>
+
+<span class="s1">nx.set_node_attributes(G, node_to_community, </span><span class="s3">&quot;community&quot;</span><span class="s1">)</span>
+<span class="s0">#%% md 
+</span><span class="s1">The algorithm found 83 communities but, checking the size of them, there are **77 communities formed by 1 or 2 nodes**. This result is strictly related to previous analysis of connected components, where I found exactly 77 components of 1 or 2 nodes. For this reason, I don't consider these couples of nodes as communities.  
+ 
+Next, I computed **community size** and **average value of features** to get some insights: 
+</span><span class="s0">#%% 
+</span><span class="s1">community_data = defaultdict(list)</span>
+
+<span class="s0"># Dictionary with node attributes</span>
+<span class="s2">for </span><span class="s1">node, attributes </span><span class="s2">in </span><span class="s1">G.nodes(data=</span><span class="s2">True</span><span class="s1">):</span>
+    <span class="s1">community = node_to_community.get(node, -</span><span class="s4">1</span><span class="s1">)  </span><span class="s0"># Ottieni la comunità del nodo</span>
+    <span class="s2">if </span><span class="s1">community != -</span><span class="s4">1</span><span class="s1">:  </span><span class="s0"># Escludi nodi senza comunità valida</span>
+        <span class="s1">community_data[community].append(attributes)</span>
+
+<span class="s0"># Group by community</span>
+<span class="s1">aggregated_data = []</span>
+<span class="s2">for </span><span class="s1">community, nodes </span><span class="s2">in </span><span class="s1">community_data.items():</span>
+    <span class="s1">aggregated_features = {</span>
+        <span class="s3">'community'</span><span class="s1">: community,</span>
+        <span class="s3">'node_count'</span><span class="s1">: len(nodes),</span>
+    <span class="s1">}</span>
+    <span class="s1">numeric_features = pd.DataFrame(nodes)</span>
+
+    <span class="s0"># Don't considere dates and language</span>
+    <span class="s1">numeric_columns = numeric_features.select_dtypes(include=[</span><span class="s3">&quot;number&quot;</span><span class="s1">])</span>
+    <span class="s1">aggregated_features.update(numeric_columns.mean().to_dict())  </span><span class="s0"># Average</span>
+    <span class="s1">aggregated_data.append(aggregated_features)</span>
+
+<span class="s0"># Convert and print the dataframe, considering only communities larger than 1 or 2 nodes</span>
+<span class="s1">community_stats = pd.DataFrame(aggregated_data)</span>
+<span class="s1">community_stats = community_stats.drop(columns=[</span><span class="s3">'node_id'</span><span class="s1">])</span>
+<span class="s1">community_stats[community_stats[</span><span class="s3">'node_count'</span><span class="s1">]&gt;</span><span class="s4">2</span><span class="s1">]</span>
+<span class="s0">#%% md 
+</span><span class="s1">The analysis of communities reveals some interesting patterns: 
+ 
+1. **Community Size:** Communities vary widely in size, with some, like Community 36 (1695 nodes), being significantly larger and likely more central, while smaller ones, like Community 48 (145 nodes), appear more peripheral. 
+ 
+2. **Engagement (Views):** Community 3 stands out with a high average of views (335,651), indicating popular streamers, while others, like Community 48 (18,547), represent less active or less followed groups. 
+ 
+3. **Professionalization (Affiliation):** Community 48 has a high affiliate ratio (0.73), suggesting a professionalized group, whereas Community 16 (0.38) may consist of more casual streamers. 
+ 
+4. **Connectivity (Degree):** Community 16 shows the highest average degree (41.88), reflecting high interconnectivity, while Community 48 is less dense (26.60). 
+ 
+5. **Clustering:** Communities like 3 (0.28) have higher clustering coefficients, indicating tight-knit groups, while others, like 48 (0.16), are less cohesive. 
+ 
+These findings suggest a mix of central, influential communities and smaller, peripheral ones. 
+ 
+--- 
+ 
+#### **2. Node2Vec Approach** 
+ 
+**Node2Vec** is a feature learning algorithm that captures structural and relational properties of nodes in a graph by generating _low-dimensional vector representations_. In this section, I leverage the Node2Vec algorithm to generate node embeddings and then use **K-Means clustering** to group nodes into clusters. 
+ 
+At first, I generate embeddings of nodes: 
+</span><span class="s0">#%% 
+# Generate Node2Vec embeddings</span>
+<span class="s1">node2vec = Node2Vec(G, dimensions=</span><span class="s4">64</span><span class="s1">, walk_length=</span><span class="s4">30</span><span class="s1">, num_walks=</span><span class="s4">200</span><span class="s1">, p=</span><span class="s4">1</span><span class="s1">, q=</span><span class="s4">1</span><span class="s1">, workers=</span><span class="s4">4</span><span class="s1">)</span>
+<span class="s1">model = node2vec.fit(window=</span><span class="s4">10</span><span class="s1">, min_count=</span><span class="s4">1</span><span class="s1">, batch_words=</span><span class="s4">4</span><span class="s1">)</span>
+
+<span class="s0"># Assign embeddings</span>
+<span class="s1">nodes_list = list(G.nodes())</span>
+<span class="s1">data_points = [model.wv[str(e)] </span><span class="s2">for </span><span class="s1">e </span><span class="s2">in </span><span class="s1">nodes_list]</span>
+<span class="s0">#%% md 
+</span><span class="s1">After obtainining the vector representation, I apply K-Means with the same number of clusters as communities found with Louvain (=6). 
+</span><span class="s0">#%% 
+# K-Means clustering w/ same number of communities as Louvain</span>
+<span class="s1">num_clusters = </span><span class="s4">6</span>
+<span class="s1">kmeans = KMeans(n_clusters=num_clusters, random_state=</span><span class="s4">42</span><span class="s1">)</span>
+<span class="s1">labels = kmeans.fit_predict(data_points)</span>
+
+<span class="s0"># Silhouette score</span>
+<span class="s1">silhouette_avg = silhouette_score(data_points, labels)</span>
+<span class="s1">print(</span><span class="s3">f&quot;Silhouette Score: </span><span class="s5">{</span><span class="s1">silhouette_avg</span><span class="s5">:</span><span class="s3">.4f</span><span class="s5">}</span><span class="s3">&quot;</span><span class="s1">)</span>
+
+<span class="s0"># Assign clusters to nodes</span>
+<span class="s1">node_clusters = pd.DataFrame({</span><span class="s3">'node'</span><span class="s1">: nodes_list, </span><span class="s3">'cluster'</span><span class="s1">: labels})</span>
+<span class="s1">node_clusters.head()</span>
+<span class="s2">for </span><span class="s1">node, cluster </span><span class="s2">in </span><span class="s1">zip(node_clusters[</span><span class="s3">'node'</span><span class="s1">], node_clusters[</span><span class="s3">'cluster'</span><span class="s1">]):</span>
+    <span class="s1">G.nodes[int(node)][</span><span class="s3">'cluster'</span><span class="s1">] = cluster</span>
+<span class="s0">#%% md 
+</span><span class="s1">A Silhouette Score of **0.03** indicates that the clusters generated with KMeans are **poorly defined**, with little separation between groups and significant overlap between nodes. This suggests that the data does not lend itself well to KMeans clustering, at least using Node2Vec vectors and pre-fixed number of clusters (without using Elbow method, for example). 
+ 
+I assign clusters back to node and generate a dataframe with characteristics for each cluster: 
+</span><span class="s0">#%% 
+# Extract features</span>
+<span class="s1">node_data = []</span>
+<span class="s2">for </span><span class="s1">node, data </span><span class="s2">in </span><span class="s1">G.nodes(data=</span><span class="s2">True</span><span class="s1">):</span>
+    <span class="s1">attributes = data.copy() </span>
+    <span class="s1">attributes[</span><span class="s3">'node_id'</span><span class="s1">] = node</span>
+    <span class="s1">attributes[</span><span class="s3">'cluster'</span><span class="s1">] = data.get(</span><span class="s3">'cluster'</span><span class="s1">, -</span><span class="s4">1</span><span class="s1">) </span>
+    <span class="s1">node_data.append(attributes)</span>
+    
+<span class="s1">node_df = pd.DataFrame(node_data)</span>
+
+<span class="s0"># Compute mean of numerical features</span>
+<span class="s1">numeric_columns = node_df.select_dtypes(include=</span><span class="s3">'number'</span><span class="s1">)</span>
+<span class="s1">cluster_means = numeric_columns.groupby(node_df[</span><span class="s3">'cluster'</span><span class="s1">]).mean()</span>
+
+<span class="s0"># Drop node_id</span>
+<span class="s1">cluster_means = cluster_means.drop(columns=[</span><span class="s3">'node_id'</span><span class="s1">])</span>
+
+<span class="s1">cluster_means</span>
+<span class="s0">#%% md 
+</span><span class="s1">As stated before, there aren't significant differences between the features of each community. 
+ 
+Let's compare the two methods using Normalised Mutual Information: 
+</span><span class="s0">#%% 
+# Create a dictionary to compare Louvain and K-Means algorithms</span>
+<span class="s1">com4nodes = {n : {</span><span class="s3">'lou'</span><span class="s1">: </span><span class="s4">0</span><span class="s1">, </span><span class="s3">'clus'</span><span class="s1">:</span><span class="s4">0 </span><span class="s1">} </span><span class="s2">for </span><span class="s1">n </span><span class="s2">in </span><span class="s1">nodes_list}</span>
+
+<span class="s2">for </span><span class="s1">i, nodes </span><span class="s2">in </span><span class="s1">enumerate(communities):</span>
+    <span class="s2">for </span><span class="s1">node </span><span class="s2">in </span><span class="s1">nodes:</span>
+        <span class="s1">com4nodes[node][</span><span class="s3">'lou'</span><span class="s1">] = i</span>
+        
+<span class="s2">for </span><span class="s1">i, e </span><span class="s2">in </span><span class="s1">enumerate(nodes_list):</span>
+    <span class="s1">com4nodes[e][</span><span class="s3">'clus'</span><span class="s1">] = kmeans.labels_[i]</span>
+
+<span class="s1">v_louvain = np.zeros(len(nodes_list))</span>
+<span class="s1">v_clus = np.zeros(len(nodes_list))</span>
+
+<span class="s2">for </span><span class="s1">i, e </span><span class="s2">in </span><span class="s1">enumerate(nodes_list):</span>
+    <span class="s1">v_louvain[i] = com4nodes[e][</span><span class="s3">'lou'</span><span class="s1">]</span>
+    <span class="s1">v_clus[i] = com4nodes[e][</span><span class="s3">'clus'</span><span class="s1">]</span>
+    
+<span class="s0"># Compute NMIS</span>
+<span class="s1">normalized_mutual_info_score(v_louvain, v_clus)</span>
+<span class="s0">#%% md 
+</span><span class="s1">An NMI of **0.43** shows that there is only **moderate similarity** between the partitions obtained with the two methods. This means that KMeans clusters __fail__ to capture the intrinsic community structure of the network well. 
+ 
+Summing up, 
+ 
+&lt;u&gt;Advantages of Louvain:&lt;/u&gt; 
+- **Modularity Approach:** Louvain maximizes modularity, which measures the density of connections within clusters compared to between clusters. It works well for networks with clear community structures, such as social networks. 
+- **Natural Community Distribution:** Louvain does not require the number of communities to be specified beforehand, unlike KMeans, which requires a fixed `k` that can be difficult to determine. 
+ 
+&lt;u&gt;Limitations of Node2Vec + KMeans:&lt;/u&gt; 
+- **Parameter Sensitivity:** Node2Vec relies on the careful tuning of parameters such as `p`, `q`, and the number of clusters `k`. Poor parameter choices can lead to suboptimal results. 
+- **Dependence on Embeddings:** The embeddings generated by Node2Vec may not fully capture the complex structural relationships within the network, especially for networks with isolated nodes or highly heterogeneous communities. 
+ 
+ 
+By adopting a visual approach, I generated a network visualization where nodes were colored based on their assigned cluster or community. As expected, the visualization using communities (detected by Louvain) creates distinct areas of color with varying densities, reflecting well-defined community structures. In contrast, the visualization based on K-Means clustering lacks clarity, with clusters appearing less distinct and less representative of the network's inherent structure. 
+ 
+ 
+</span><span class="s0">#%% 
+</span>
+<span class="s1">img1 = mpimg.imread(</span><span class="s3">'communities.png'</span><span class="s1">) </span>
+<span class="s1">img2 = mpimg.imread(</span><span class="s3">'clusters.png'</span><span class="s1">) </span>
+
+
+<span class="s1">fig, axes = plt.subplots(</span><span class="s4">1</span><span class="s1">, </span><span class="s4">2</span><span class="s1">, figsize=(</span><span class="s4">12</span><span class="s1">, </span><span class="s4">7</span><span class="s1">))  </span><span class="s0"># 1 riga, 2 colonne</span>
+<span class="s1">axes[</span><span class="s4">0</span><span class="s1">].imshow(img1)</span>
+<span class="s1">axes[</span><span class="s4">0</span><span class="s1">].axis(</span><span class="s3">'off'</span><span class="s1">) </span>
+<span class="s1">axes[</span><span class="s4">0</span><span class="s1">].set_title(</span><span class="s3">'Community-Based Visualization'</span><span class="s1">)</span>
+
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].imshow(img2)</span>
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].axis(</span><span class="s3">'off'</span><span class="s1">)  </span>
+<span class="s1">axes[</span><span class="s4">1</span><span class="s1">].set_title(</span><span class="s3">'K-Means-Based Visualization'</span><span class="s1">)</span>
+
+<span class="s1">plt.tight_layout()</span>
+<span class="s1">plt.show()</span>
+<span class="s0">#%% md 
+</span>
+<span class="s0">#%% 
+</span><span class="s1">nx.write_graphml(G, </span><span class="s3">&quot;wcomm.graphml&quot;</span><span class="s1">)</span></pre>
+</body>
+</html>
